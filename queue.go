@@ -23,6 +23,7 @@ func NewBucketQueue(name string, concurWorkerNum uint32, logger *log.Logger) *Bu
 		name:            name,
 		bucketMap:       make(map[int64]*Bucket),
 		taskCh:          make(chan *Task),
+		newTaskInSign:   make(chan struct{}),
 		concurWorkerNum: concurWorkerNum,
 		logger:          logger,
 	}
@@ -42,6 +43,7 @@ type BucketQueue struct {
 	curBucket       *Bucket
 	bucketMap       map[int64]*Bucket
 	taskCh          chan *Task
+	newTaskInSign   chan struct{}
 	concurWorkerNum uint32
 	mu              sync.Mutex
 	logger          *log.Logger
@@ -55,6 +57,13 @@ func (q *BucketQueue) Reg(task *Task) {
 			task.delayAt = time.Now().Unix() + int64(task.retryDelay)
 		}
 	}
+
+	defer func() {
+		select {
+		case q.newTaskInSign <- struct{}{}:
+		default:
+		}
+	}()
 
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -86,25 +95,27 @@ func (q *BucketQueue) Reg(task *Task) {
 func (q *BucketQueue) Run() {
 	for i := uint32(0); i < q.concurWorkerNum; i++ {
 		go func() {
-			task := <-q.taskCh
-			task.attempted++
-			q.logger.Infof(nil, "BucketQueue(name:%s) exec task.%s.id:%s, attempted:%d", q.name, task.name, task.taskId, task.attempted)
-			err := task.hdl(task)
-			if err != nil {
-				q.logger.Errorf(
-					nil,
-					"BucketQueue(name:%s) exec task.%s.id:%s, attempted:%d, FAILED!!reason:%v",
-					q.name, task.name, task.taskId, task.attempted, err,
-				)
-				if task.maxAttempt <= task.attempted {
-					return
+			for {
+				task := <-q.taskCh
+				task.attempted++
+				q.logger.Infof(nil, "BucketQueue(name:%s) exec task.%s.id:%s, attempted:%d", q.name, task.name, task.taskId, task.attempted)
+				err := task.hdl(task)
+				if err != nil {
+					q.logger.Errorf(
+						nil,
+						"BucketQueue(name:%s) exec task.%s.id:%s, attempted:%d, FAILED!!reason:%v",
+						q.name, task.name, task.taskId, task.attempted, err,
+					)
+					if task.maxAttempt <= task.attempted {
+						continue
+					}
+					if task.retryDelay > 0 {
+						task.delayAt = time.Now().Unix() + int64(task.retryDelay)
+					} else {
+						task.delayAt = time.Now().Unix() + int64(task.delay)
+					}
+					q.Reg(task)
 				}
-				if task.retryDelay > 0 {
-					task.delayAt = time.Now().Unix() + int64(task.retryDelay)
-				} else {
-					task.delayAt = time.Now().Unix() + int64(task.delay)
-				}
-				q.Reg(task)
 			}
 		}()
 	}
@@ -143,7 +154,13 @@ func (q *BucketQueue) sched() {
 					delete(q.bucketMap, bucketId)
 				}
 				q.mu.Unlock()
-				time.Sleep(time.Second)
+				waitNewTaskTimeoutTk := time.NewTimer(time.Second)
+				select {
+				case <-waitNewTaskTimeoutTk.C:
+					waitNewTaskTimeoutTk.Stop()
+				case <-q.newTaskInSign:
+					waitNewTaskTimeoutTk.Stop()
+				}
 				loopEmptyCnt = 0
 			} else {
 				q.mu.Unlock()

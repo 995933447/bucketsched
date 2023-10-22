@@ -60,5 +60,13 @@ func TestQueue(t *testing.T) {
 		return nil
 	}, 1, 2))
 
-	time.Sleep(time.Second * 20)
+	go func() {
+		time.Sleep(time.Second * 6)
+		q.Reg(NewTask(4, "taskA", func(task *Task) error {
+			fmt.Println("i am task C, bucketID 4, delay 0")
+			return nil
+		}, 0, 1))
+	}()
+
+	time.Sleep(30 * time.Minute)
 }
