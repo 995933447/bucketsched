@@ -8,7 +8,7 @@ import (
 )
 
 func TestQueue(t *testing.T) {
-	q := NewBucketQueue("testQ", 10, nil)
+	q := NewBucketQueue("testQ", 10)
 
 	go q.Run()
 
