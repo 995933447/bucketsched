@@ -1,4 +1,4 @@
-package bucketQueue
+package bucketsched
 
 import (
 	"errors"
