@@ -1,4 +1,4 @@
-module 995933447/bucketsched
+module github.com/995933447/bucketsched
 
 go 1.20
 
