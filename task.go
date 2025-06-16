@@ -7,13 +7,16 @@ import (
 )
 
 func NewTask(bucketId int64, name string, hdl func(task *Task) error, delay uint32, maxAttempt uint32) *Task {
+	if len(name) > 1024 {
+		name = name[:1024]
+	}
 	return &Task{
 		bucketId:   bucketId,
 		taskId:     uuid.NewV4().String(),
 		name:       name,
 		hdl:        hdl,
 		delay:      delay,
-		delayAt:    time.Now().Unix() + int64(delay),
+		delayAt:    time.Now().UnixNano() + int64(delay)*1000000000,
 		maxAttempt: maxAttempt,
 	}
 }
@@ -54,7 +57,7 @@ func (q *taskHeap) popTask() (*Task, bool) {
 	if len(*q) == 0 {
 		return nil, false
 	}
-	if (*q)[0].delayAt > time.Now().Unix() {
+	if (*q)[0].delayAt > time.Now().UnixNano() {
 		return nil, false
 	}
 	return heap.Pop(q).(*Task), true
