@@ -2,9 +2,11 @@ package bucketsched
 
 import (
 	"errors"
-	uuid "github.com/satori/go.uuid"
 	"sync"
+	"sync/atomic"
 	"time"
+
+	uuid "github.com/satori/go.uuid"
 )
 
 var ErrQueueStackFull = errors.New("queue stack full")
@@ -55,6 +57,7 @@ type BucketQueue struct {
 	bucketConcurRec map[int64]uint32
 	mu              sync.Mutex
 	size            int
+	currSize        atomic.Int32
 }
 
 func (q *BucketQueue) SetSize(size int) {
@@ -65,13 +68,7 @@ func (q *BucketQueue) SetSize(size int) {
 }
 
 func (q *BucketQueue) Size() int {
-	var queueSize int
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	for _, bucket := range q.bucketMap {
-		queueSize += len(*bucket.tasks)
-	}
-	return queueSize
+	return int(q.currSize.Load())
 }
 
 func (q *BucketQueue) Reg(task *Task) error {
@@ -97,6 +94,8 @@ func (q *BucketQueue) Reg(task *Task) error {
 
 	q.mu.Lock()
 	defer q.mu.Unlock()
+
+	q.currSize.Add(1)
 
 	bucket, ok := q.bucketMap[task.bucketId]
 	if ok {
@@ -208,6 +207,7 @@ func (q *BucketQueue) sched() {
 		q.mu.Unlock()
 		if ok {
 			loopEmptyCnt = 0
+			q.currSize.Add(-1)
 			q.taskCh <- task
 		} else {
 			loopEmptyCnt++
